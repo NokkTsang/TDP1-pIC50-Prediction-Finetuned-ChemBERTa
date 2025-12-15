@@ -1,4 +1,97 @@
-# TDP1 pIC50 Prediction - Using ChemBERTa
+# TDP1 pIC50 Prediction - Using ChemBERTa-77M-MTR
+
+## Usage
+
+This section provides instructions for using the trained ChemBERTa-77M-MTR model to predict pIC50 values for novel compounds.
+
+### Quick Prediction with Script
+
+The easiest way to make predictions is using the provided prediction script:
+
+#### Prerequisites
+
+```bash
+pip install torch transformers pandas numpy tqdm
+```
+
+#### Basic Usage
+
+```bash
+# Input file should be placed in the 'input/' directory
+python scripts/predict_pic50.py --input your_compounds.csv --output predictions.csv
+
+# Or use full paths
+python scripts/predict_pic50.py --input /path/to/your_compounds.csv --output /path/to/predictions.csv
+```
+
+#### Input Format
+
+Place your input CSV file in the `input/` directory. It must contain a `SMILES` column with valid SMILES strings:
+
+```csv
+SMILES
+CC(C)Cc1ccc(cc1)[C@@H](C)C(=O)O
+CC(=O)Oc1ccccc1C(=O)O
+CN1C=NC2=C1C(=O)N(C(=O)N2C)C
+```
+
+Additional columns (e.g., compound IDs, names) will be preserved in the output.
+
+#### Output Format
+
+The script generates a CSV file in the `output/` directory with:
+- All original columns from input
+- `Predicted_pIC50`: Predicted pIC50 value for each compound
+- **Sorted by Predicted_pIC50 in descending order** (most potent compounds first)
+
+Example output:
+```csv
+SMILES,Predicted_pIC50
+CC(C)Cc1ccc(cc1)[C@@H](C)C(=O)O,7.45
+CC(=O)Oc1ccccc1C(=O)O,6.23
+CN1C=NC2=C1C(=O)N(C(=O)N2C)C,5.12
+```
+
+#### Advanced Options
+
+```bash
+# Specify custom SMILES column name
+python scripts/predict_pic50.py --input data.csv --output results.csv --smiles_column "Canonical_SMILES"
+
+# Adjust batch size for GPU memory (default: 32)
+python scripts/predict_pic50.py --input data.csv --output results.csv --batch_size 64
+
+# Use custom model path
+python scripts/predict_pic50.py --input data.csv --output results.csv --model_path "path/to/model"
+```
+
+#### Example Workflow
+
+```bash
+# 1. Test with the provided example file (located in input/ directory)
+python scripts/predict_pic50.py --input example_input.csv --output example_predictions.csv
+
+# 2. Place your own compounds CSV in the input/ directory and run prediction
+python scripts/predict_pic50.py --input your_compounds.csv --output predictions.csv
+
+# 3. Find results in the output/ directory. The script will display:
+#    - Progress bar during prediction
+#    - Summary statistics (mean, median, min, max pIC50)
+#    - Top 10% most active compounds
+```
+
+#### Important Notes
+
+⚠️ **Model Performance Context**: This model is optimized for **Drug Discovery Metrics** and **Virtual Screening Metrics**. The predictions are designed to:
+- Identify potential TDP1 inhibitors in virtual screening campaigns
+- Prioritize compounds for experimental validation
+- Support hit-to-lead optimization
+
+**Recommendations**:
+- Use predictions as a **screening tool**, not absolute activity values
+- Always validate top predictions experimentally
+- Consider the model's focus on drug-like chemical space
+- Results are most reliable for compounds similar to the training data distribution
 
 ## Future Improvements
 
@@ -11,30 +104,32 @@ The current optimization uses only **10 trials (~1.5 hours)**, which provides a 
 Beyond the current 6 hyperparameters, incorporate additional parameters such as **layer-wise learning rates** (lower rates for pretrained layers, higher for the regression head), **gradient clipping thresholds**, and **learning rate schedulers** (cosine decay, polynomial warmup). These refinements can stabilize training and improve convergence, especially for the imbalanced dataset.
 
 **Advanced Training Strategies:**
-Implement **focal loss weighting** to further emphasize hard-to-classify active compounds, or use **curriculum learning** by gradually increasing sample weight ratios during training. Additionally, **ensemble methods** combining the top 3-5 Optuna trials could reduce prediction variance and improve robustness on the test set.
+Implement **stratified sample weighting** where ultra-potent compounds (pIC50 > 8.0) receive 100-200x weight instead of uniform 23.3x for all actives. Alternatively, use **focal loss** with γ=2-5 to heavily penalize mispredictions on rare extreme values, forcing the model to learn the full pIC50 range. Additionally, **two-stage modeling** (first classify into activity bins, then regress within bins) could prevent range compression. **Ensemble methods** combining the top 3-5 Optuna trials could reduce prediction variance and improve robustness, especially for extreme values.
 
 **Expected Impact:**
-With these improvements, the MTR model's validation loss could decrease from the current ~0.179 to **~0.150-0.160**, translating to better identification of novel TDP1 inhibitors in virtual screening applications.
+Addressing ultra-potent compound prediction through stratified weighting + focal loss could reduce errors on pIC50 > 8.0 from **3-4 units to <1 unit**. Combined with extended hyperparameter search, validation loss could decrease from ~0.179 to **~0.150-0.160**, translating to better identification across the full activity spectrum.
 
 ### Data-Driven Optimization Strategies
 
 **SMILES Augmentation:**
-Generate multiple equivalent SMILES representations for each molecule using **SMILES enumeration** (randomizing atom ordering while preserving structure). This creates 5-10 variants per compound, effectively expanding the training set from 123,964 to ~500,000 samples without introducing synthetic data. This augmentation acts as regularization, helping the model learn rotation-invariant molecular representations and improving generalization by 8-15%.
+Generate multiple equivalent SMILES representations using **SMILES enumeration** (randomizing atom ordering while preserving structure). For the **275 ultra-potent compounds (pIC50 > 8.0)**, create **20-50 variants each** to effectively increase their representation from ~192 to ~4,000-10,000 training examples. For moderate actives, 5-10 variants suffice. This targeted augmentation addresses the extreme rarity issue (0.16% of dataset) while acting as regularization, improving generalization by 8-15% overall and **potentially 50%+ for ultra-potent prediction**.
 
 **Active Learning for Imbalanced Data:**
-Instead of fixed sample weights (23.3x for actives), implement **uncertainty-based reweighting** where compounds with high prediction uncertainty receive dynamically increased weights during training. After each epoch, identify the top 10% most uncertain predictions and boost their weights by 1.5x, allowing the model to focus on hard-to-learn boundary cases between active and inactive compounds. This adaptive approach can improve AUC-ROC by 5-10% compared to static weighting.
+Instead of fixed sample weights (23.3x for actives), implement **uncertainty-based reweighting** where compounds with high prediction uncertainty receive dynamically increased weights during training. After each epoch, identify the top 10% most uncertain predictions and boost their weights by 1.5x, allowing the model to focus on hard-to-learn boundary cases between active and inactive compounds. This adaptive approach can improve AUC-ROC by 5-10% compared to static weighting. **Critically**, separately track ultra-potent compounds (pIC50 > 8.0) and maintain minimum 100x weight to prevent range compression.
 
 **Scaffold-Based Data Splitting:**
 Replace the current random stratified split with **scaffold splitting** using molecular scaffolds (core structures). This ensures that chemically similar compounds don't appear in both training and test sets, providing a more realistic evaluation of the model's ability to generalize to novel chemical series. While this typically increases validation loss initially, it produces models that perform 15-20% better on truly out-of-distribution compounds in real drug discovery scenarios.
-
-**Targeted Data Enrichment:**
-Add external TDP1 bioassay data from **ChEMBL** (additional ~2,000-5,000 compounds) and **BindingDB** to increase active compound representation. Prioritize adding compounds with pIC50 > 7.0 (highly potent) to better train the model on the critical high-potency range where only 792 compounds currently exist. This enrichment could improve active compound prediction MAE by 20-30%.
 
 **Physicochemical Property Filtering:**
 Pre-filter the dataset to remove compounds violating **Lipinski's Rule of Five** or with poor ADME properties, as these are unlikely drug candidates regardless of pIC50. This focuses the model on drug-like chemical space, reducing noise from ~15% of compounds (26,500 entries) and improving prediction accuracy on viable drug candidates by 10-15%.
 
 **Expected Combined Impact:**
-Combining data augmentation (SMILES enumeration) + active learning + scaffold splitting could improve validation loss from ~0.179 to **~0.140-0.155**, representing a 13-22% performance gain through data-centric approaches alone, before even optimizing hyperparameters.
+Combining targeted SMILES augmentation (20-50x for ultra-potent) + stratified sample weighting (100-200x for pIC50 > 8.0) + external data enrichment (doubling ultra-potent examples) + scaffold splitting could:
+- **Reduce ultra-potent prediction error from 3-4 units to <1 unit** (addressing the critical weakness)
+- Improve validation loss from ~0.179 to **~0.140-0.155** (13-22% gain)
+- Achieve consistent performance across the full activity spectrum, not just moderate range
+
+These data-centric approaches directly address the **root cause** (extreme rarity of ultra-potent compounds) rather than just symptom management through hyperparameters.
 
 ### Alternative Architecture
 

@@ -1,0 +1,14 @@
+{
+  "best_params": {
+    "learning_rate": 4.6070962557673397e-05,
+    "batch_size": 32,
+    "weight_decay": 0.0011178018548585339,
+    "num_epochs": 7,
+    "dropout": 0.09954554774384414,
+    "warmup_ratio": 0.07602832965396175
+  },
+  "best_value": 0.17929700016975403,
+  "best_trial": 5,
+  "n_trials": 10,
+  "duration_hours": 1.4510902558333332
+}

@@ -1,0 +1,41 @@
+======================================================================
+OPTIMIZATION COMPLETED!
+======================================================================
+Duration: 1.45 hours
+Best trial: 6
+Best val loss: 0.1793
+
+Best hyperparameters:
+   learning_rate: 4.6070962557673397e-05
+   batch_size: 32
+   weight_decay: 0.0011178018548585339
+   num_epochs: 7
+   dropout: 0.09954554774384414
+   warmup_ratio: 0.07602832965396175
+
+Best parameters saved to: optuna_results_MTR_sample_weighting\best_params.json
+All trials saved to: optuna_results_MTR_sample_weighting\all_trials.json
+
+Top 5 Trials:
+   1. Trial 6: Loss=0.1793
+      LR=4.61e-05, Batch=32
+   2. Trial 5: Loss=0.1829
+      LR=5.44e-05, Batch=32
+   3. Trial 7: Loss=0.1859
+      LR=6.52e-05, Batch=32
+   4. Trial 9: Loss=0.2167
+      LR=1.94e-05, Batch=32
+   5. Trial 1: Loss=0.2259
+      LR=1.01e-05, Batch=32
+
+======================================================================
+Next step: Use best hyperparameters in training script
+======================================================================
+
+Update ChemBERTa-77M-MTR-sample-weighting.py with:
+LEARNING_RATE = 4.61e-05
+BATCH_SIZE = 32
+WEIGHT_DECAY = 0.0011
+NUM_EPOCHS = 7
+DROPOUT = 0.100
+WARMUP_RATIO = 0.076
