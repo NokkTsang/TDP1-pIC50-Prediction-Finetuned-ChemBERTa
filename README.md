@@ -96,18 +96,3 @@ python scripts/predict_pic50.py --input your_compounds.txt --output predictions.
 #    - Summary statistics (mean, median, min, max pIC50)
 #    - Top 10% most active compounds
 ```
-
-#### Important Notes
-
-⚠️ **Model Performance Context**: This model is optimized for **Drug Discovery Metrics** and **Virtual Screening Metrics**. The predictions are designed to:
-
-- Identify potential TDP1 inhibitors in virtual screening campaigns
-- Prioritize compounds for experimental validation
-- Support hit-to-lead optimization
-
-**Recommendations**:
-
-- Use predictions as a **screening tool**, not absolute activity values
-- Always validate top predictions experimentally
-- Consider the model's focus on drug-like chemical space
-- Results are most reliable for compounds similar to the training data distribution
