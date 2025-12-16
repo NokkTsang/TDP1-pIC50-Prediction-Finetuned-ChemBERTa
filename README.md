@@ -4,6 +4,23 @@
 
 This section provides instructions for using the trained ChemBERTa-77M-MTR model to predict pIC50 values for novel compounds.
 
+### Prepare Prediction Data
+
+For large-scale virtual screening, can use the PubChem compound library. The `CID-SMILES.gz` file is available from the [PubChem FTP server](ftp://ftp.ncbi.nlm.nih.gov/pubchem/Compound/Extras/) containing ~123 million compounds.
+
+```bash
+# 1. Download from PubChem FTP
+wget ftp://ftp.ncbi.nlm.nih.gov/pubchem/Compound/Extras/CID-SMILES.gz -O data/PubChem_123M_prediction.gz
+
+# 2. Unzip (or use an app)
+gunzip data/PubChem_123M_prediction.gz
+
+# 3. Run script to extract SMILES and filter out training compounds (to avoid data leakage)
+python scripts/prepare_prediction_data.py
+```
+
+Output: `input/final_smiles_prediction.txt` with ~123 million SMILES ready for prediction.
+
 ### Quick Prediction with Script
 
 The easiest way to make predictions is using the provided prediction script:
@@ -18,61 +35,56 @@ pip install torch transformers pandas numpy tqdm
 
 ```bash
 # Input file should be placed in the 'input/' directory
-python scripts/predict_pic50.py --input your_compounds.csv --output predictions.csv
+python scripts/predict_pic50.py --input your_compounds.txt --output predictions.csv
 
 # Or use full paths
-python scripts/predict_pic50.py --input /path/to/your_compounds.csv --output /path/to/predictions.csv
+python scripts/predict_pic50.py --input /path/to/your_compounds.txt --output /path/to/predictions.csv
 ```
 
 #### Input Format
 
-Place your input CSV file in the `input/` directory. It must contain a `SMILES` column with valid SMILES strings:
+Place your input TXT file in the `input/` directory. One SMILES string per line:
 
-```csv
-SMILES
+```
 CC(C)Cc1ccc(cc1)[C@@H](C)C(=O)O
 CC(=O)Oc1ccccc1C(=O)O
 CN1C=NC2=C1C(=O)N(C(=O)N2C)C
 ```
 
-Additional columns (e.g., compound IDs, names) will be preserved in the output.
-
 #### Output Format
 
 The script generates a CSV file in the `output/` directory with:
-- All original columns from input
-- `Predicted_pIC50`: Predicted pIC50 value for each compound
+
+- Format: `SMILES,Predicted_pIC50`
 - **Sorted by Predicted_pIC50 in descending order** (most potent compounds first)
 
 Example output:
+
 ```csv
 SMILES,Predicted_pIC50
-CC(C)Cc1ccc(cc1)[C@@H](C)C(=O)O,7.45
-CC(=O)Oc1ccccc1C(=O)O,6.23
-CN1C=NC2=C1C(=O)N(C(=O)N2C)C,5.12
+CC(C)Cc1ccc(cc1)[C@@H](C)C(=O)O,7.4500
+CC(=O)Oc1ccccc1C(=O)O,6.2300
+CN1C=NC2=C1C(=O)N(C(=O)N2C)C,5.1200
 ```
 
 #### Advanced Options
 
 ```bash
-# Specify custom SMILES column name
-python scripts/predict_pic50.py --input data.csv --output results.csv --smiles_column "Canonical_SMILES"
-
 # Adjust batch size for GPU memory (default: 32)
-python scripts/predict_pic50.py --input data.csv --output results.csv --batch_size 64
+python scripts/predict_pic50.py --input data.txt --output results.csv --batch_size 64
 
 # Use custom model path
-python scripts/predict_pic50.py --input data.csv --output results.csv --model_path "path/to/model"
+python scripts/predict_pic50.py --input data.txt --output results.csv --model_path "path/to/model"
 ```
 
 #### Example Workflow
 
 ```bash
 # 1. Test with the provided example file (located in input/ directory)
-python scripts/predict_pic50.py --input example_input.csv --output example_predictions.csv
+python scripts/predict_pic50.py --input example_input.txt --output example_predictions.csv
 
-# 2. Place your own compounds CSV in the input/ directory and run prediction
-python scripts/predict_pic50.py --input your_compounds.csv --output predictions.csv
+# 2. Place your own compounds TXT in the input/ directory and run prediction
+python scripts/predict_pic50.py --input your_compounds.txt --output predictions.csv
 
 # 3. Find results in the output/ directory. The script will display:
 #    - Progress bar during prediction
@@ -83,11 +95,13 @@ python scripts/predict_pic50.py --input your_compounds.csv --output predictions.
 #### Important Notes
 
 ⚠️ **Model Performance Context**: This model is optimized for **Drug Discovery Metrics** and **Virtual Screening Metrics**. The predictions are designed to:
+
 - Identify potential TDP1 inhibitors in virtual screening campaigns
 - Prioritize compounds for experimental validation
 - Support hit-to-lead optimization
 
 **Recommendations**:
+
 - Use predictions as a **screening tool**, not absolute activity values
 - Always validate top predictions experimentally
 - Consider the model's focus on drug-like chemical space
@@ -125,6 +139,7 @@ Pre-filter the dataset to remove compounds violating **Lipinski's Rule of Five**
 
 **Expected Combined Impact:**
 Combining targeted SMILES augmentation (20-50x for ultra-potent) + stratified sample weighting (100-200x for pIC50 > 8.0) + external data enrichment (doubling ultra-potent examples) + scaffold splitting could:
+
 - **Reduce ultra-potent prediction error from 3-4 units to <1 unit** (addressing the critical weakness)
 - Improve validation loss from ~0.179 to **~0.140-0.155** (13-22% gain)
 - Achieve consistent performance across the full activity spectrum, not just moderate range

@@ -1,0 +1,10 @@
+CC(C)Cc1ccc(cc1)C(C)C(=O)O
+CC(=O)Oc1ccccc1C(=O)O
+CN1C=NC2=C1C(=O)N(C(=O)N2C)C
+c1ccc2c(c1)cc3ccccc3n2
+CC(C)(C)NCC(O)c1ccc(O)c(CO)c1
+Cc1ccc(cc1)S(=O)(=O)N
+COc1ccc2nc(nc(N)c2c1)c3ccccc3
+CC(=O)Nc1ccc(O)cc1
+c1ccc(cc1)c2ccccc2
+O=C(O)Cc1ccccc1Nc2c(Cl)cccc2Cl
