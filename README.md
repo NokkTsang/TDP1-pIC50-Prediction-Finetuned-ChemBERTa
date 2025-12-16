@@ -6,11 +6,16 @@ This section provides instructions for using the trained ChemBERTa-77M-MTR model
 
 ### Prepare Prediction Data
 
-For large-scale virtual screening, can use the PubChem compound library. The `CID-SMILES.gz` file is available from the [PubChem FTP server](ftp://ftp.ncbi.nlm.nih.gov/pubchem/Compound/Extras/) containing ~123 million compounds.
+For large-scale virtual screening, you can use the PubChem compound library (~123 million compounds).
+
+**Download the pre-processed data file:**
+
+- [Google Drive: PubChem_123M_prediction.gz](https://drive.google.com/file/d/1-tP6yzSQv0vXTiB2lBt0Xoo_eimn6M53/view?usp=sharing) (1.47 GB)
+
+_Original source: [PubChem FTP server](ftp://ftp.ncbi.nlm.nih.gov/pubchem/Compound/Extras/) - `CID-SMILES.gz`_
 
 ```bash
-# 1. Download from PubChem FTP
-wget ftp://ftp.ncbi.nlm.nih.gov/pubchem/Compound/Extras/CID-SMILES.gz -O data/PubChem_123M_prediction.gz
+# 1. Download from Google Drive and place in data/ folder
 
 # 2. Unzip (or use an app)
 gunzip data/PubChem_123M_prediction.gz
