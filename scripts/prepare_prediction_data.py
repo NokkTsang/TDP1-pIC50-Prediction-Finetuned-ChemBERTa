@@ -1,7 +1,7 @@
 import os
 
 # === Input files ===
-prediction_path = "data/PubChem_123M_prediction.gz"
+prediction_path = "data/PubChem_123M_prediction"  # Unzipped file (no .gz extension)
 train_path = "data/177k_training.txt"
 
 # === Output file ===

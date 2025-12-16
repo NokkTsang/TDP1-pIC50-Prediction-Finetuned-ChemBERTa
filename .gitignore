@@ -27,5 +27,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.log
+
+# Large data files
 data/PubChem_123M_prediction.gz
 data/PubChem_123M_prediction
+input/final_smiles_prediction.txt
