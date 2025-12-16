@@ -48,6 +48,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # Model parameters
 MAX_LENGTH = 512
 ACTIVE_THRESHOLD = 6.0
+FLUSH_INTERVAL = 100000  # Write to disk every 100K compounds
 
 # ============================================================================
 # Prediction Functions
@@ -78,66 +79,190 @@ def load_model_and_tokenizer(model_path, base_model_name, device):
     return model, tokenizer
 
 
-def predict_pic50_batch(
-    smiles_list, model, tokenizer, device, batch_size=32, max_length=512
+def get_batch_filename(output_base, batch_num):
+    """Generate batch filename like: predictions_123M_batch_001.csv"""
+    base, ext = os.path.splitext(output_base)
+    return f"{base}_batch_{batch_num:03d}{ext}"
+
+
+def find_existing_batches(output_base):
+    """Find already completed batch files and return the highest batch number."""
+    base, ext = os.path.splitext(output_base)
+    batch_dir = os.path.dirname(output_base) or "."
+    
+    existing_batches = []
+    for f in os.listdir(batch_dir):
+        if f.startswith(os.path.basename(base) + "_batch_") and f.endswith(ext):
+            try:
+                # Extract batch number from filename
+                batch_num = int(f.split("_batch_")[1].split(".")[0])
+                existing_batches.append(batch_num)
+            except (ValueError, IndexError):
+                continue
+    
+    return sorted(existing_batches)
+
+
+def predict_pic50_streaming(
+    input_file, output_file, model, tokenizer, device, batch_size=32, max_length=512, flush_interval=100000
 ):
     """
-    Predict pIC50 values for a batch of SMILES strings.
+    Predict pIC50 values and write to separate batch files.
+    Supports resuming from the last completed batch.
 
     Args:
-        smiles_list (list): List of SMILES strings
+        input_file (str): Path to input file with SMILES strings
+        output_file (str): Path to output CSV file (used as base name for batch files)
         model: Trained ChemBERTa model
         tokenizer: ChemBERTa tokenizer
         device: torch device (cpu or cuda)
         batch_size (int): Number of compounds to process at once
         max_length (int): Maximum sequence length
+        flush_interval (int): Write to disk every N compounds (each batch file)
 
     Returns:
-        list: List of predicted pIC50 values
+        tuple: (total_count, valid_count, failed_count, all_predictions_for_stats)
     """
     model.eval()
-    predictions = []
+    
+    # Count total lines first
+    print("Counting total compounds...")
+    with open(input_file, "r") as f:
+        total_lines = sum(1 for line in f if line.strip())
+    print(f"Total compounds to process: {total_lines}")
+    
+    # Check for existing batches (resume capability)
+    existing_batches = find_existing_batches(output_file)
+    start_batch = 0
+    skip_lines = 0
+    
+    if existing_batches:
+        start_batch = max(existing_batches)
+        skip_lines = start_batch * flush_interval
+        print(f"\n[Resume] Found {len(existing_batches)} existing batch file(s)")
+        print(f"[Resume] Skipping first {skip_lines:,} compounds (batches 1-{start_batch})")
+        print(f"[Resume] Resuming from batch {start_batch + 1}")
+    
+    # Statistics
+    all_predictions = []
+    processed_count = 0
+    valid_count = 0
+    failed_count = 0
+    current_batch_num = start_batch
+    
+    # Buffer for current batch
+    buffer = []
+    lines_skipped = 0
+    
+    with open(input_file, "r") as in_f:
+        smiles_batch = []
+        
+        with tqdm(total=total_lines, desc="Predicting", unit="compounds", initial=skip_lines) as pbar:
+            for line in in_f:
+                smiles = line.strip()
+                if not smiles:
+                    continue
+                
+                # Skip already processed lines
+                if lines_skipped < skip_lines:
+                    lines_skipped += 1
+                    continue
+                    
+                smiles_batch.append(smiles)
+                
+                # Process when we have enough for a batch
+                if len(smiles_batch) >= batch_size:
+                    predictions = _predict_batch(smiles_batch, model, tokenizer, device, max_length)
+                    
+                    for smi, pred in zip(smiles_batch, predictions):
+                        buffer.append((smi, pred))
+                        all_predictions.append(pred)
+                        if np.isnan(pred):
+                            failed_count += 1
+                        else:
+                            valid_count += 1
+                    
+                    processed_count += len(smiles_batch)
+                    pbar.update(len(smiles_batch))
+                    smiles_batch = []
+                    
+                    # Write batch file when buffer is full
+                    if len(buffer) >= flush_interval:
+                        current_batch_num += 1
+                        batch_file = get_batch_filename(output_file, current_batch_num)
+                        
+                        with open(batch_file, "w") as out_f:
+                            out_f.write("SMILES,Predicted_pIC50\n")
+                            for smi, pred in buffer:
+                                out_f.write(f"{smi},{pred:.4f}\n")
+                        
+                        total_so_far = skip_lines + processed_count
+                        print(f"\n[Batch {current_batch_num}] Saved {batch_file} ({total_so_far:,} compounds total)")
+                        buffer = []
+            
+            # Process remaining SMILES
+            if smiles_batch:
+                predictions = _predict_batch(smiles_batch, model, tokenizer, device, max_length)
+                
+                for smi, pred in zip(smiles_batch, predictions):
+                    buffer.append((smi, pred))
+                    all_predictions.append(pred)
+                    if np.isnan(pred):
+                        failed_count += 1
+                    else:
+                        valid_count += 1
+                
+                processed_count += len(smiles_batch)
+                pbar.update(len(smiles_batch))
+    
+    # Write remaining buffer as final batch
+    if buffer:
+        current_batch_num += 1
+        batch_file = get_batch_filename(output_file, current_batch_num)
+        
+        with open(batch_file, "w") as out_f:
+            out_f.write("SMILES,Predicted_pIC50\n")
+            for smi, pred in buffer:
+                out_f.write(f"{smi},{pred:.4f}\n")
+        
+        total_so_far = skip_lines + processed_count
+        print(f"\n[Batch {current_batch_num}] Saved {batch_file} ({total_so_far:,} compounds total)")
+    
+    total_processed = skip_lines + processed_count
+    print(f"\n[Complete] All {total_processed:,} compounds processed")
+    print(f"[Complete] Output saved in {current_batch_num} batch file(s)")
+    print(f"[Complete] Files: {get_batch_filename(output_file, 1)} ... {get_batch_filename(output_file, current_batch_num)}")
+    
+    return total_processed, valid_count, failed_count, all_predictions
 
-    # Process in batches with progress bar
-    num_batches = (len(smiles_list) + batch_size - 1) // batch_size
 
-    with tqdm(total=len(smiles_list), desc="Predicting", unit="compounds") as pbar:
-        for i in range(0, len(smiles_list), batch_size):
-            batch_smiles = smiles_list[i : i + batch_size]
-
-            try:
-                # Tokenize batch
-                encodings = tokenizer(
-                    batch_smiles,
-                    max_length=max_length,
-                    padding="max_length",
-                    truncation=True,
-                    return_tensors="pt",
-                )
-
-                # Move to device
-                input_ids = encodings["input_ids"].to(device)
-                attention_mask = encodings["attention_mask"].to(device)
-
-                # Make predictions
-                with torch.no_grad():
-                    outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-                    batch_predictions = outputs.logits.squeeze().cpu().numpy()
-
-                # Handle single prediction case
-                if len(batch_smiles) == 1:
-                    predictions.append(float(batch_predictions))
-                else:
-                    predictions.extend(batch_predictions.tolist())
-
-            except Exception as e:
-                print(f"\nError processing batch {i//batch_size + 1}: {e}")
-                # Add NaN for failed predictions
-                predictions.extend([np.nan] * len(batch_smiles))
-
-            pbar.update(len(batch_smiles))
-
-    return predictions
+def _predict_batch(smiles_batch, model, tokenizer, device, max_length):
+    """
+    Predict pIC50 for a single batch of SMILES.
+    """
+    try:
+        encodings = tokenizer(
+            smiles_batch,
+            max_length=max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
+        
+        input_ids = encodings["input_ids"].to(device)
+        attention_mask = encodings["attention_mask"].to(device)
+        
+        with torch.no_grad():
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+            batch_predictions = outputs.logits.squeeze().cpu().numpy()
+        
+        if len(smiles_batch) == 1:
+            return [float(batch_predictions)]
+        else:
+            return batch_predictions.tolist()
+    except Exception as e:
+        print(f"\nError processing batch: {e}")
+        return [np.nan] * len(smiles_batch)
 
 
 def classify_activity(pic50_value, threshold=6.0):
@@ -237,54 +362,34 @@ def main():
         print(f"Error loading model: {e}")
         sys.exit(1)
 
-    # Load input data
-    print(f"\nLoading input data from {input_file}...")
-    try:
-        with open(input_file, "r") as f:
-            smiles_list = [line.strip() for line in f if line.strip()]
-    except Exception as e:
-        print(f"Error reading input TXT: {e}")
-        sys.exit(1)
-
-    print(f"Loaded {len(smiles_list)} compounds")
-
-    # Make predictions
-    print(f"\nPredicting pIC50 values...")
-    predictions = predict_pic50_batch(
-        smiles_list,
+    # Make predictions with streaming (writes to disk in batches)
+    print(f"\nPredicting pIC50 values (streaming mode - writes every {FLUSH_INTERVAL:,} compounds)...")
+    print(f"Output file: {output_file}")
+    
+    total_count, valid_count, failed_count, all_predictions = predict_pic50_streaming(
+        input_file,
+        output_file,
         model,
         tokenizer,
         device,
         batch_size=args.batch_size,
         max_length=MAX_LENGTH,
+        flush_interval=FLUSH_INTERVAL,
     )
-
-    # Create results list and sort by predicted pIC50 in descending order
-    results = list(zip(smiles_list, predictions))
-    results.sort(
-        key=lambda x: x[1] if not np.isnan(x[1]) else float("-inf"), reverse=True
-    )
-
-    # Save results
-    print(f"\nSaving predictions to {output_file}...")
-    try:
-        with open(output_file, "w") as f:
-            f.write("SMILES,Predicted_pIC50\n")
-            for smiles, pred in results:
-                f.write(f"{smiles},{pred:.4f}\n")
-        print(f"Predictions saved successfully!")
-    except Exception as e:
-        print(f"Error saving output CSV: {e}")
-        sys.exit(1)
 
     # Print summary statistics
     print("\n" + "=" * 70)
     print("PREDICTION SUMMARY")
     print("=" * 70)
-    valid_predictions = [p for p in predictions if not np.isnan(p)]
-    print(f"Total compounds:        {len(smiles_list)}")
-    print(f"Valid predictions:      {len(valid_predictions)}")
-    print(f"Failed predictions:     {len(smiles_list) - len(valid_predictions)}")
+    valid_predictions = [p for p in all_predictions if not np.isnan(p)]
+    print(f"Total compounds:        {total_count}")
+    print(f"Valid predictions:      {valid_count}")
+    print(f"Failed predictions:     {failed_count}")
+    print(f"\nOutput files: {os.path.dirname(output_file) or 'output/'}")
+    print(f"  Format: {os.path.basename(output_file).replace('.csv', '')}_batch_XXX.csv")
+    print(f"\nTo merge all batch files, use:")
+    print(f"  PowerShell: Get-Content *_batch_*.csv | Set-Content merged.csv")
+    print(f"  Or use Python/pandas to concatenate the files.")
 
     if len(valid_predictions) > 0:
         print(f"\npIC50 Statistics:")
@@ -294,15 +399,14 @@ def main():
         print(f"  Min:                  {np.min(valid_predictions):.2f}")
         print(f"  Max:                  {np.max(valid_predictions):.2f}")
 
-        # Highlight top 10% most active compounds
-        top_percent = max(1, int(len(results) * 0.1))  # At least 1 compound
-        print(
-            f"\nTop 10% Most Active Compounds ({top_percent} compounds, Predicted pIC50):"
-        )
+        # Show top predictions info
+        sorted_preds = sorted(valid_predictions, reverse=True)
+        top_10_preds = sorted_preds[:10]
+        print(f"\nTop 10 Predicted pIC50 values:")
         print("-" * 70)
-        for smiles, pred in results[:top_percent]:
-            display_smiles = smiles[:47] + "..." if len(smiles) > 50 else smiles
-            print(f"  {pred:.2f}  -  {display_smiles}")
+        for i, pred in enumerate(top_10_preds, 1):
+            print(f"  {i}. pIC50 = {pred:.4f}")
+        print(f"\nTo find top compounds, sort the output CSV by Predicted_pIC50 column.")
 
     print("=" * 70)
     print("\nNote: Model performance is optimized for Drug Discovery Metrics")
