@@ -32,3 +32,10 @@ Thumbs.db
 data/PubChem_123M_prediction.gz
 data/PubChem_123M_prediction
 input/final_smiles_prediction.txt
+
+# Output files (exclude all files in output directory, except example_prediction.csv)
+!output/example_prediction.csv
+output/*
+top_1000_compounds.csv
+.pdf
+.png
