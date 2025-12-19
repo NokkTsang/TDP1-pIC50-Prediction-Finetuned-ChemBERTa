@@ -37,5 +37,5 @@ input/final_smiles_prediction.txt
 !output/example_prediction.csv
 output/*
 top_1000_compounds.csv
-.pdf
-.png
+*.pdf
+*.png
